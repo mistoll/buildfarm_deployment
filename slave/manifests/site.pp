@@ -127,7 +127,7 @@ include '::ntp'
 ### install latest docker
 
 class {'docker':
-  version => '1.7.1',
+  version => '1.9.1-0~trusty',
 }
 
 package { 'python3-pip':
@@ -164,18 +164,32 @@ if hiera('run_squid', false) {
     group  => 'proxy',
   }
 
+  file { '/var/log/squid-in-a-can' :
+    ensure => 'directory',
+    mode   => 644,
+    owner  => 'proxy',
+    group  => 'proxy',
+  }
+
+  $disk_cache_size = hiera('squid-in-a-can::max_cache_size', 5000)
+  $max_cache_object = hiera('squid-in-a-can::max_cache_object', 1000)
   docker::run {'squid-in-a-can':
     image   => 'jpetazzo/squid-in-a-can',
     command => '/tmp/deploy_squid.py',
-    env     => ['DISK_CACHE_SIZE=5000', 'MAX_CACHE_OBJECT=1000', 'SQUID_DIRECTIVES=\'
+    env     => ["DISK_CACHE_SIZE=${disk_cache_size}",
+                "MAX_CACHE_OBJECT=${max_cache_object}",
+                'SQUID_DIRECTIVES=\'
 refresh_pattern . 0 0 1 refresh-ims
 refresh_all_ims on # make sure we do not get out of date content #41
 ignore_expect_100 on # needed for new relic system monitor
 \''],
-    volumes => ['/var/cache/squid-in-a-can:/var/cache/squid3'],
+    volumes => ['/var/cache/squid-in-a-can:/var/cache/squid3',
+                '/var/log/squid-in-a-can:/var/log/squid3',
+                ],
     net     => 'host',
     require => [Docker::Image['jpetazzo/squid-in-a-can'],
                 File['/var/cache/squid-in-a-can'],
+                File['/var/log/squid-in-a-can'],
                ],
   }
 
@@ -216,11 +230,6 @@ else {
   }
 }
 
-# leave this in to clean up autoreconfigured machines #2015-02-02
-cron {'docker_cleanup_containers':
-  ensure => absent,
-  user    => 'jenkins-slave',
-}
 
 # clean up containers and dangling images https://github.com/docker/docker/issues/928#issuecomment-58619854
 cron {'docker_cleanup_images':
@@ -228,8 +237,8 @@ cron {'docker_cleanup_images':
   user    => 'jenkins-slave',
   month   => absent,
   monthday => absent,
-  hour    => '*/2',
-  minute  => 15,
+  hour    => '*',
+  minute  => '*/15',
   weekday => absent,
   require => User['jenkins-slave'],
 }

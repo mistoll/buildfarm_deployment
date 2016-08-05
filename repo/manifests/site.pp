@@ -11,7 +11,7 @@ user{'jenkins-slave':
   ensure => present,
   managehome => true,
   groups => ['docker'],
-  require => Package['lxc-docker']
+  require => Package['docker']
 }
 
 
@@ -26,6 +26,7 @@ if hiera('classes', false) {
 ### install latest docker
 
 class {'docker':
+  version => '1.9.1-0~trusty',
 }
 
 # Find the other instances
@@ -160,7 +161,9 @@ file { '/home/jenkins-slave/.buildfarm/reprepro-updater.ini':
 }
 
 # Set up apache
-class { 'apache': }
+class { 'apache':
+  default_vhost => false,
+}
 
 # Make your repo publicly accessible
 apache::vhost { 'repos':
@@ -304,7 +307,7 @@ cron {'docker_cleanup_images':
   user    => 'jenkins-slave',
   month   => absent,
   monthday => absent,
-  hour    => '*/2',
+  hour    => '*',
   minute  => 15,
   weekday => absent,
   require => User['jenkins-slave'],
@@ -323,12 +326,6 @@ pip::install { 'docker-py':
   require => Package['python3-pip'],
 }
 
-# remove old cron jobs from previously configured re #46
-# This can be removed once there are verified to be no machines running this cron job.
-cron {'docker_cleanup_containers':
-  ensure => 'absent',
-  user    => 'jenkins-slave',
-}
 
 # needed for boostrapping the repo
 vcsrepo { "/home/jenkins-slave/reprepro-updater":

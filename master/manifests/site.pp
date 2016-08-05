@@ -53,28 +53,9 @@ user{'jenkins-slave':
   ensure => present,
   managehome => true,
   groups => ['docker'],
-  require => Package['lxc-docker']
+  require => Package['docker']
 }
 
-
-$slave_buildfarm_config_dir = ['/home/jenkins-slave/.buildfarm']
-file { $slave_buildfarm_config_dir:
-  ensure => 'directory',
-  mode => '0640',
-  owner => jenkins-slave,
-  group => jenkins-slave,
-}
-
-file { '/home/jenkins-slave/.buildfarm/jenkins.ini':
-  ensure => 'present',
-  mode => '0640',
-  owner => jenkins-slave,
-  group => jenkins-slave,
-  content => template('jenkins_files/jenkins.ini.erb'),
-  require => [User['jenkins-slave'],
-              File[$slave_buildfarm_config_dir],],
-  notify => Service['jenkins-slave'],
-}
 
 package { 'git':
   ensure => 'installed',
@@ -85,6 +66,29 @@ package { 'subversion':
 }
 
 ### Jenkins Plugins
+
+# required by workflow-cps
+jenkins::plugin {
+  'ace-editor': ;
+}
+
+# required by warnings
+jenkins::plugin {
+  'analysis-core': ;
+}
+
+jenkins::plugin {
+  'audit-trail': ;
+}
+# config for audit-trail
+file { '/var/lib/jenkins/audit-trail.xml':
+    mode => '0640',
+    owner => jenkins,
+    group => jenkins,
+    source => 'puppet:///modules/jenkins_files/var/lib/jenkins/audit-trail.xml',
+    require => Jenkins::Plugin['audit-trail'],
+    notify => Service['jenkins'],
+}
 
 jenkins::plugin {
   'bazaar': ;
@@ -115,12 +119,22 @@ jenkins::plugin {
   'copyartifact': ;
 }
 
+# required by ssh-agent
+jenkins::plugin {
+  'credentials': ;
+}
+
 jenkins::plugin {
   'dashboard-view': ;
 }
 
 jenkins::plugin {
   'description-setter': ;
+}
+
+# required by groovy-postbuild
+jenkins::plugin {
+  'durable-task': ;
 }
 
 jenkins::plugin {
@@ -190,12 +204,35 @@ jenkins::plugin {
 }
 
 jenkins::plugin {
+  'jobConfigHistory': ;
+}
+# config for jobConfigHistory
+file { '/var/lib/jenkins/jobConfigHistory.xml':
+    mode => '0640',
+    owner => jenkins,
+    group => jenkins,
+    source => 'puppet:///modules/jenkins_files/var/lib/jenkins/jobConfigHistory.xml',
+    require => Jenkins::Plugin['jobConfigHistory'],
+    notify => Service['jenkins'],
+}
+
+jenkins::plugin {
   'jobrequeue': ;
+}
+
+# required by groovy-postbuild
+jenkins::plugin {
+  'jquery-detached': ;
 }
 
 # required by subversion
 jenkins::plugin {
   'mapdb-api': ;
+}
+
+# required by ghprb and groovy-postbuild
+jenkins::plugin {
+  'matrix-project': ;
 }
 
 jenkins::plugin {
@@ -212,6 +249,11 @@ jenkins::plugin {
 
 jenkins::plugin {
   'parameterized-trigger': ;
+}
+
+# required by ghprb
+jenkins::plugin {
+  'plain-credentials': ;
 }
 
 jenkins::plugin {
@@ -239,7 +281,7 @@ file { '/var/lib/jenkins/jenkins.plugins.publish_over_ssh.BapSshPublisherPlugin.
     mode => '0640',
     owner => jenkins,
     group => jenkins,
-    source => 'puppet:///modules/jenkins_files/var/lib/jenkins/jenkins.plugins.publish_over_ssh.BapSshPublisherPlugin.xml',
+    content => template('jenkins_files/jenkins.plugins.publish_over_ssh.BapSshPublisherPlugin.xml.erb'),
     require => Jenkins::Plugin['publish-over-ssh'],
     notify => Service['jenkins'],
 }
@@ -262,8 +304,22 @@ jenkins::plugin {
   'ssh-agent': ;
 }
 
+# required by ssh-agent
+jenkins::plugin {
+  'ssh-credentials': ;
+}
+
 jenkins::plugin {
   'subversion': ;
+}
+# config for subversion
+file { '/var/lib/jenkins/hudson.scm.SubversionSCM.xml':
+    mode => '0640',
+    owner => jenkins,
+    group => jenkins,
+    source => 'puppet:///modules/jenkins_files/var/lib/jenkins/hudson.scm.SubversionSCM.xml',
+    require => Jenkins::Plugin['subversion'],
+    notify => Service['jenkins'],
 }
 
 jenkins::plugin {
@@ -271,7 +327,12 @@ jenkins::plugin {
 }
 
 jenkins::plugin {
-  'swarm': ;
+  'swarm':
+    require => Package['wget'];
+}
+
+package { 'wget':
+  ensure => 'installed',
 }
 
 jenkins::plugin {
@@ -283,6 +344,31 @@ jenkins::plugin {
   'token-macro': ;
 }
 
+jenkins::plugin {
+  'warnings': ;
+}
+
+# required by workflow-cps
+jenkins::plugin {
+  'workflow-api': ;
+}
+
+# required by groovy-postbuild
+jenkins::plugin {
+  'workflow-cps': ;
+}
+
+# required by workflow-cps
+jenkins::plugin {
+  'workflow-support': ;
+}
+
+# required by workflow-cps
+jenkins::plugin {
+  'workflow-scm-step': ;
+}
+
+# required by ssh-agent and workflow-cps
 jenkins::plugin {
   'workflow-step-api': ;
 }
@@ -326,7 +412,7 @@ file { '/etc/default/jenkins':
     mode => '0644',
     owner => root,
     group => root,
-    source => 'puppet:///modules/jenkins_files/etc/default/jenkins',
+    content => template('jenkins_files/etc_default_jenkins.erb'),
     require => Package['jenkins'],
     notify => Service['jenkins'],
 }
@@ -346,6 +432,19 @@ file { '/var/lib/jenkins/config.xml':
   notify => Service['jenkins'],
 }
 
+# Use default mercurial, but enable caching.
+# Otherwise if the workspace is lost mercurial will trigger a job
+# whenever it tries to poll.
+file { '/var/lib/jenkins/hudson.plugins.mercurial.MercurialInstallation.xml':
+  ensure => 'present',
+  mode => '0640',
+  owner => jenkins,
+  group => jenkins,
+  source => 'puppet:///modules/jenkins_files/var/lib/jenkins/hudson.plugins.mercurial.MercurialInstallation.xml',
+  require => Package['jenkins'],
+  notify => Service['jenkins'],
+}
+
 file { '/var/lib/jenkins/nodeMonitors.xml':
   ensure => 'present',
   mode => '0640',
@@ -358,7 +457,9 @@ file { '/var/lib/jenkins/nodeMonitors.xml':
 
 $user_dirs = ['/var/lib/jenkins/users',
               '/var/lib/jenkins/users/admin',
-              '/var/lib/jenkins/secrets',]
+              '/var/lib/jenkins/secrets',
+              '/var/lib/jenkins/secrets/filepath-filters.d',
+              ]
 
 file { $user_dirs:
   ensure => 'directory',
@@ -375,10 +476,22 @@ file { '/var/lib/jenkins/secrets/slave-to-master-security-kill-switch':
   owner => jenkins,
   group => jenkins,
   source => 'puppet:///modules/jenkins_files/var/lib/jenkins/secrets/slave-to-master-security-kill-switch',
-  require => Package['jenkins'],
+  require => [Package['jenkins'],
+              File[$user_dirs],],
   notify => Service['jenkins'],
 }
 
+# Give access to ssh_id to slaves
+file { '/var/lib/jenkins/secrets/filepath-filters.d/60-ssh-id.conf':
+  ensure => 'present',
+  mode => '0640',
+  owner => jenkins,
+  group => jenkins,
+  source => 'puppet:///modules/jenkins_files/var/lib/jenkins/secrets/filepath-filters.d/60-ssh-id.conf',
+  require => [Package['jenkins'],
+              File[$user_dirs],],
+  notify => Service['jenkins'],
+}
 
 # Create an admin user:
 file { '/var/lib/jenkins/users/admin/config.xml':
@@ -389,24 +502,6 @@ file { '/var/lib/jenkins/users/admin/config.xml':
   content => template('jenkins_files/user_config.xml.erb'),
   require => [Package['jenkins'],
               File[$user_dirs],],
-  notify => Service['jenkins'],
-}
-
-$buildfarm_config_dir = ['/var/lib/jenkins/.buildfarm']
-file { $buildfarm_config_dir:
-  ensure => 'directory',
-  mode => '0640',
-  owner => jenkins,
-  group => jenkins,
-}
-file { '/var/lib/jenkins/.buildfarm/jenkins.ini':
-  ensure => 'present',
-  mode => '0640',
-  owner => jenkins,
-  group => jenkins,
-  content => template('jenkins_files/jenkins.ini.erb'),
-  require => [Package['jenkins'],
-              File[$buildfarm_config_dir],],
   notify => Service['jenkins'],
 }
 
@@ -422,12 +517,15 @@ class { 'timezone':
 class {'docker':
 }
 
-user { 'jenkins':
-  name => 'jenkins',
-  groups => ['jenkins', 'docker'],
-  require => Package['docker'],
+# Add jenkins user to docker group if not already
+exec {'jenkins docker membership':
+  unless => '/bin/bash -c "/usr/bin/id -nG jenkins | /bin/grep -wq docker"',
+  command => '/usr/sbin/usermod -aG docker jenkins',
+  require => User['jenkins'],
 }
 
+## Credentials necessar for Publish over SSH
+## Everything else uses the built in credentials
 file { '/var/lib/jenkins/.ssh':
     ensure => 'directory',
     owner  => 'jenkins',
@@ -453,7 +551,7 @@ if hiera('ssh_keys', false){
   create_resources(ssh_authorized_key, hiera('ssh_keys'), $defaults)
 }
 else{
-  notice("No ssh_authorized_keys defined. There should probably be at least one.")
+  notice('No ssh_authorized_keys defined. There should probably be at least one.')
 }
 
 
@@ -463,7 +561,6 @@ file { '/var/lib/jenkins/credentials.xml':
     owner => 'jenkins',
     group => 'jenkins',
     content => template('jenkins_files/credentials.xml.erb'),
-    require => File['/var/lib/jenkins/.ssh'],
 }
 
 
@@ -501,7 +598,7 @@ cron {'docker_cleanup_images':
   user    => 'jenkins-slave',
   month   => absent,
   monthday => absent,
-  hour    => '*/2',
+  hour    => '*',
   minute  => 15,
   weekday => absent,
   require => User['jenkins-slave'],
@@ -509,7 +606,7 @@ cron {'docker_cleanup_images':
 
 
 package { 'python3-pip':
- ensure => 'installed',
+  ensure => 'installed',
 }
 # required by cleanup_docker script
 pip::install { 'docker-py':
@@ -518,4 +615,17 @@ pip::install { 'docker-py':
   python_version => '3', # defaults to 2.7
   #ensure => present, # defaults to present
   require => Package['python3-pip'],
+}
+
+# setup apache
+class { 'apache':
+  default_vhost => false,
+}
+
+apache::vhost { 'master':
+  docroot => '/var/www.html',
+  port    => '80',
+  proxy_pass => [
+    { 'path' => '/', 'url' => 'http://localhost:8080/'},
+  ],
 }
