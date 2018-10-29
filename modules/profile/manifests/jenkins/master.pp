@@ -4,20 +4,22 @@ class profile::jenkins::master {
   include profile::jenkins::rosplugins
   include profile::jenkins::agent
 
+  # This is a workaround for https://github.com/jenkinsci/puppet-jenkins/pull/821
+  # Creates a dependency thread from adding the jenkins source repository, updating apt repos,
+  # and installing the Jenkins package.
+  # This can get removed when that PR merges and we update to a release that includes it.
+  Apt::Source['jenkins'] -> Class['Apt::Update'] -> Package<|tag == $::jenkins::package_name|>
+
   include jenkins_files
 
   ### Jenkins Plugins
 
   # config for gitscm
-  jenkins::cli::exec { 'configure_git_user':
-    # semicolons are needed because the lines are joined with spaces rather than newlines.
-    command => [
-      'def gitscm_config = Jenkins.getInstance().getDescriptor("hudson.plugins.git.GitSCM");',
-      'gitscm_config.setCreateAccountBasedOnEmail(false);',
-      'gitscm_config.setGlobalConfigName("jenkins");',
-      'gitscm_config.setGlobalConfigEmail("jenkins@build.ros.org");',
-      'gitscm_config.save();',
-    ]
+  file { '/tmp/configure_git_user.groovy':
+    source => 'puppet:///modules/profile/jenkins/master/configure_git_user.groovy',
+  } ->
+  rosjenkins::groovy { '/tmp/configure_git_user.groovy':
+    require => Jenkins::Plugin['git'],
   }
 
   # config for audit-trail
@@ -241,10 +243,10 @@ class profile::jenkins::master {
   exec {'jenkins docker membership':
     unless => '/bin/bash -c "/usr/bin/id -nG jenkins | /bin/grep -wq docker"',
     command => '/usr/sbin/usermod -aG docker jenkins',
-    require => User['jenkins'],
+    require => [Class['docker'], User['jenkins']],
   }
 
-  ## Credentials necessar for Publish over SSH
+  ## Credentials necessary for 'Publish over SSH'
   ## Everything else uses the built in credentials
   file { '/var/lib/jenkins/.ssh':
     ensure => 'directory',
@@ -263,11 +265,21 @@ class profile::jenkins::master {
     require => File['/var/lib/jenkins/.ssh'],
   }
 
-  # Reference above credientials
+  # Reference above credentials
   file { '/var/lib/jenkins/credentials.xml':
     mode => '0600',
     owner => 'jenkins',
     group => 'jenkins',
     content => template('jenkins_files/credentials.xml.erb'),
+  }
+
+  cron {'docker image prune':
+    command => 'docker image prune -f',
+    user    => root,
+    month   => absent,
+    monthday => absent,
+    hour    => '0',
+    minute  => '0',
+    weekday => absent,
   }
 }
